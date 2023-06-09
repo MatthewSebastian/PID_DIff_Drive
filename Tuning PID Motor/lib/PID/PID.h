@@ -20,8 +20,8 @@ struct PID_params
     float derivative = 0;
     unsigned long time = 0;
     float time_sampling = 100;
-    float maxControl = 40;
-    float minControl = -40;
+    float maxControl = 200;
+    float minControl = -200;
 };
 
 float PID(PID_params param);

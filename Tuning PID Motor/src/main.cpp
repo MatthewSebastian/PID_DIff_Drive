@@ -18,6 +18,8 @@ struct velocity_param
     int act_rpm = 0; //Kecepatan input RPM
     int u = 0;
     float delta_time = 0;
+    float pos = 0;
+    float posPrev = 0;
 };
 
 //Header LIB PID
@@ -33,7 +35,7 @@ void M2_maju(int speed_m);
 void M1_mundur(int speed_m);
 void M2_mundur(int speed_m);
 void velocity1(int i);
-float velocity(int i);
+void velocity(int i);
 void avg_fill(int i, int N);
 
 // Pin Motor DC
@@ -147,10 +149,15 @@ void setup(){
   param[1].KD = 0;
   
   // initialize();
+  
 
 }
 
 void loop(){
+  // M1_maju(30);
+  // M2_maju(30);
+  // M1_mundur(50);
+  // M2_mundur(50);
   if (Serial.available() > 0){
     Serial.setTimeout(100);
     READ_DATA_UNTIL('\n');
@@ -168,60 +175,66 @@ void loop(){
     Serial.flush();
 
   }
-
-  if (millis() - curr_time > ts){
-    curr_time = millis();
-    // param[0].set_point = param[1].set_point = SP;
-    param[0].KP = KP1;
-    param[0].KI = KI1;
-    param[0].KD = KD1;
-    param[1].KP = KP2;
-    param[1].KI = KI2;
-    param[1].KD = KD2;
-
-    //Konversi m/s ke RPM
-    c = phi*(r*2);
-    vel[0].act_rpm = int((SP/c) * 60.0);
-    vel[1].act_rpm = int((SP/c) * 60.0);
-
-    param[0].set_point = vel[0].act_rpm;
-    param[1].set_point = vel[1].act_rpm;
-
-    vel[0].rpm = (vel[0].kecepatan*48)/60; //RPM
-    vel[1].rpm = (vel[1].kecepatan*48)/60; //RPM
-    avg_fill(0, 600);
-    avg_fill(1, 600);
-    param[0].feedback = vel[0].avg_rpm/2;
-    param[1].feedback = vel[1].avg_rpm/2;
-
-    //Konversi RPM ke m/s
-    vel[0].act_speed = (vel[0].avg_rpm*c)/60;
-    vel[1].act_speed = (vel[1].avg_rpm*c)/60;
-    
-    // if(control_PID[0] >= maxControl) control_PID[0] = maxControl;
-    // if(control_PID[0] <= minControl) control_PID[0] = minControl;
-    // if(control_PID[1] >= maxControl) control_PID[1] = maxControl;
-    // if(control_PID[1] <= minControl) control_PID[1] = minControl;
-    control_PID[0] = (int) PID(param[0]);
-    control_PID[1] = (int) PID(param[1]);
-
-    if (control_PID[0] == 0){
-      vel[0].kecepatan = 0;
-    }
-    if (control_PID[1] == 0){
-      vel[1].kecepatan = 0;
-    }
-
-    if (control_PID[0] >= 0) M1_maju(control_PID[0]);
-    if (control_PID[0] < 0) M1_mundur(control_PID[0]*-1);
-     
-    if (control_PID[1] >= 0) M2_maju(control_PID[1]);
-    if (control_PID[1] < 0) M2_mundur(control_PID[1]*-1);
     // Serial.println(String(param[0].set_point)+","+String(vel[0].avg_rpm)+","+String(control_PID[0])+",");
     // Serial.println(String(SP)+","+String(vel[0].avg_rpm)+","+String(vel[1].avg_rpm)+",");
     // Serial.println(String(SP)+","+String(param[0].feedback)+","+String(param[1].feedback)+",");
-    Serial.println(String(SP)+","+String(vel[0].act_speed)+","+String(vel[1].act_speed)+",");
+    // Serial.println(String(SP)+","+String(vel[0].act_speed)+","+String(vel[1].act_speed)+",");
+  
+  if (millis() - curr_time > ts){
+      curr_time = millis();
+      vel[0].pos = 0;
+      vel[1].pos = 0;
+      noInterrupts();
+      vel[0].pos = vel[0].encoder;
+      vel[1].pos = vel[1].encoder;
+      interrupts();
+
+      velocity(0);
+      velocity(1);
+
+      // param[0].set_point = param[1].set_point = SP;
+
+      param[0].KP = KP1;
+      param[0].KI = KI1;
+      param[0].KD = KD1;
+      param[1].KP = KP2;
+      param[1].KI = KI2;
+      param[1].KD = KD2;
+
+      //Konversi m/s ke RPM
+      c = phi*(r*2); //0.21
+      vel[0].act_rpm = ((SP/c) * 60.0);
+      vel[1].act_rpm = ((SP/c) * 60.0);
+
+      param[0].set_point = vel[0].act_rpm;
+      param[1].set_point = vel[1].act_rpm;
+
+      param[0].feedback = vel[0].avg_rpm/2;
+      param[1].feedback = vel[1].avg_rpm/2;
+
+      //Konversi RPM ke m/s
+      vel[0].act_speed = (vel[0].avg_rpm*c)/60;
+      vel[1].act_speed = (vel[1].avg_rpm*c)/60;
+
+      control_PID[0] = (int) PID(param[0]);
+      control_PID[1] = (int) PID(param[1]);
+
+      if ((SP <= 0.09) && (SP >= -0.09)){
+        M1_maju(0);
+        M2_maju(0);
+      }
+
+      // if (control_PID[0] > 0) M1_maju(control_PID[0]);
+      // if (control_PID[0] < 0) M1_mundur(control_PID[0]*-1);
+        
+      // if (control_PID[1] > 0) M2_maju(control_PID[1]);
+      // if (control_PID[1] < 0) M2_mundur(control_PID[1]*-1);
+      Serial.println(String(SP)+","+String(control_PID[0])+","+String(control_PID[1])+",");
+      // Serial.println(String(vel[0].act_rpm)+","+String(vel[0].avg_rpm)+","+String(vel[1].avg_rpm)+",");
+      // Serial.println(String(SP)+","+String(vel[0].act_speed)+","+String(vel[1].act_speed)+",");
   }
+      
+
 }
 
 //M1 = motor kiri, M2 = motor kanan
@@ -255,15 +268,16 @@ void velocity1(int i){
   vel[i].prev_time = vel[i].curr_time;
 }
 
-float velocity(int i){
-    vel[i].curr_time = millis();
-    if(vel[i].curr_time - vel[i].prev_time > ts){
-        vel[i].prev_time = vel[i].curr_time;
-        vel[i].kecepatan = (float)(vel[i].encoder*600/vel[i].pulse_rev);
-        // Serial.print(vel[i].kecepatan);
-        vel[i].encoder = 0;
-    }
-    return 0;
+void velocity(int i){
+    vel[i].curr_time =  micros();
+    vel[i].delta_time = (float)(vel[i].curr_time - vel[i].prev_time)/1.0e6;
+    vel[i].kecepatan = (vel[i].pos-vel[i].posPrev)/vel[i].delta_time;
+    // vel[i].rpm = (vel[i].kecepatan*100)/60; //RPM
+    vel[i].rpm = vel[i].kecepatan;
+    avg_fill(i, 600);
+    avg_fill(i, 600);
+    vel[i].posPrev = vel[i].pos;
+    vel[i].prev_time = vel[i].curr_time;
 }
 
 void avg_fill(int i, int N){
@@ -281,7 +295,7 @@ void encoderA(){
   if (enc[0]>0){vel[0].inc=1;}
   else{vel[0].inc=-1;}
   vel[0].encoder += vel[0].inc;
-  velocity1(0);
+  // velocity1(0);
 }
 
 //Encoder Motor Kanan
@@ -291,5 +305,5 @@ void encoderB(){
   if (enc[1]>0){vel[1].inc=1;}
   else{vel[1].inc=-1;}
   vel[1].encoder += vel[1].inc;
-  velocity1(1);
+  // velocity1(1);
 }

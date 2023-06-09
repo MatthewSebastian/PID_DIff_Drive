@@ -33,6 +33,9 @@ unsigned char rw[6];
 void cmd_vel_cb(const geometry_msgs::Twist& twist){
   demandx = twist.linear.x;
   demandz = twist.angular.z;
+
+  // if ((demandz <= 7.05) && (demandz >= 0)) demandz = 7.05;
+  // else if ((demandz >= -7.05) && (demandz < 0)) demandz = -7.05;
 }
 
 //Setting Subcriber dan Publisher
@@ -58,6 +61,8 @@ struct velocity_param
     float delta_time = 0;
     float act_rpm = 0;
     float act_speed = 0;
+    float pos = 0;
+    float posPrev = 0;
 };
 
 //Header LIB PID
@@ -74,7 +79,7 @@ void M2_maju(int speed_m);
 void M1_mundur(int speed_m);
 void M2_mundur(int speed_m);
 void velocity1(int i);
-float velocity(int i);
+void velocity(int i);
 void avg_fill(int i, int N);
 void publishPos(double time);
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
@@ -188,11 +193,11 @@ void setup(){
   attachInterrupt(digitalPinToInterrupt(encoderA2),encoderA,RISING);
   attachInterrupt(digitalPinToInterrupt(encoderB2),encoderB,RISING);
 
-  param[0].KP = 1.5; //0
-  param[0].KI = 0.0; //0
-  param[0].KD = 0.0; //0
-  param[1].KP = 1.6; //0
-  param[1].KI = 0.0; //0
+  param[0].KP = 0.9257; //0
+  param[0].KI = 0.0022; //0
+  param[0].KD = 0; //0
+  param[1].KP = 0.9333; //0
+  param[1].KI = 0.0026; //0
   param[1].KD = 0; //0
 
   nh.initNode();
@@ -208,22 +213,27 @@ void setup(){
 void loop(){
   if (millis() - curr_time > ts){
     curr_time = millis();
+    vel[0].pos = 0;
+    vel[1].pos = 0;
+    noInterrupts();
+    vel[0].pos = vel[0].encoder;
+    vel[1].pos = vel[1].encoder;
+    interrupts();
+
+    velocity(0);
+    velocity(1);
 
     demand_speed_left = demandx - (demandz*0.0875);
     demand_speed_right = demandx + (demandz*0.0875);
 
     //Konversi m/s ke RPM
     c = phi*(r*2);
-    vel[0].act_rpm = int((demand_speed_left/c) * 60.0);
-    vel[1].act_rpm = int((demand_speed_right/c) * 60.0);
+    vel[0].act_rpm = ((demand_speed_left/c) * 60.0);
+    vel[1].act_rpm = ((demand_speed_right/c) * 60.0);
 
     param[0].set_point = vel[0].act_rpm;
     param[1].set_point = vel[1].act_rpm;
 
-    vel[0].rpm = (vel[0].kecepatan*48)/60; //RPM
-    vel[1].rpm = (vel[1].kecepatan*48)/60; //RPM
-    avg_fill(0, 600);
-    avg_fill(1, 600);
     param[0].feedback = vel[0].avg_rpm/2;
     param[1].feedback = vel[1].avg_rpm/2;
 
@@ -241,12 +251,26 @@ void loop(){
     encoder_prev[0] = vel[0].encoder;
     encoder_prev[1] = vel[1].encoder;
 
-    if (control_PID[0] >= 0) M1_maju(control_PID[0]);
+    if (control_PID[0] > 0) M1_maju(control_PID[0]);
     if (control_PID[0] < 0) M1_mundur(control_PID[0]*-1);
      
     
-    if (control_PID[1] >= 0) M2_maju(control_PID[1]);
+    if (control_PID[1] > 0) M2_maju(control_PID[1]);
     if (control_PID[1] < 0) M2_mundur(control_PID[1]*-1);
+
+    if (demand_speed_left == 0.0){
+        param[0].error = 0;
+        param[0].error_prev = 0;
+        M1_maju(0);
+        M1_mundur(0);
+    }
+    
+    if (demand_speed_right == 0.0){
+        param[1].error = 0;
+        param[1].error_prev = 0;
+        M2_maju(0);
+        M2_mundur(0);
+    }
 
     // if (update_nh > 10){
     //   nh.spinOnce();
@@ -261,8 +285,8 @@ void loop(){
 //Pengiriman data odometry ke Jetson Nano
 void publishPos(double time){
   speed_msg.header.stamp = nh.now();
-  speed_msg.vector.x = speed_left;
-  speed_msg.vector.y = speed_right;
+  speed_msg.vector.x = vel[0].act_speed; //speed_left;
+  speed_msg.vector.y = vel[1].act_speed; //speed_right;
   speed_msg.vector.z = time/1000;
   speed_pub.publish(&speed_msg);
   // left_wheel_msg.data = param[0].feedback;
@@ -301,15 +325,16 @@ void velocity1(int i){
   vel[i].prev_time = vel[i].curr_time;
 }
 
-float velocity(int i){
-    vel[i].curr_time = millis();
-    if(vel[i].curr_time - vel[i].prev_time > ts){
-        vel[i].prev_time = vel[i].curr_time;
-        vel[i].kecepatan = (float)(vel[i].encoder*600/vel[i].pulse_rev);
-        // Serial.print(vel[i].kecepatan);
-        vel[i].encoder = 0;
-    }
-    return 0;
+void velocity(int i){
+    vel[i].curr_time =  micros();
+    vel[i].delta_time = (float)(vel[i].curr_time - vel[i].prev_time)/1.0e6;
+    vel[i].kecepatan = (vel[i].pos-vel[i].posPrev)/vel[i].delta_time;
+    // vel[i].rpm = (vel[i].kecepatan*100)/60; //RPM
+    vel[i].rpm = vel[i].kecepatan;
+    avg_fill(i, 600);
+    avg_fill(i, 600);
+    vel[i].posPrev = vel[i].pos;
+    vel[i].prev_time = vel[i].curr_time;
 }
 
 void avg_fill(int i, int N){
@@ -327,7 +352,6 @@ void encoderA(){
   if (enc[0]>0){vel[0].inc=1;}
   else{vel[0].inc=-1;}
   vel[0].encoder += vel[0].inc;
-  velocity1(0);
 }
 
 //Encoder Motor Kanan
@@ -337,5 +361,4 @@ void encoderB(){
   if (enc[1]>0){vel[1].inc=1;}
   else{vel[1].inc=-1;}
   vel[1].encoder += vel[1].inc;
-  velocity1(1);
 }
